@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "(cd web/src/js && babel ./** --out-dir ../dist/ --presets react-app/prod)",
-    "start": "node index.js"
+    "build": "sh build.sh",
+    "start": "node index.js",
+    "listen": "sh build-dev.sh & npm start"
   },
   "keywords": [],
   "author": "",
@@ -17,7 +18,8 @@
     "express": "^4.16.4",
     "firebase-admin": "^7.3.0",
     "handlebars": "^4.1.2",
-    "lodash": "^4.17.11"
+    "lodash": "^4.17.11",
+    "sass": "^1.19.0"
   },
   "devDependencies": {
     "@types/node": "^11.13.8"

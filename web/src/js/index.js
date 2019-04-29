@@ -18,7 +18,7 @@ class IndexPage extends React.Component {
 
     render() {
         return (
-            <div>
+            <div className="inner-root">
                 <h1>Outie</h1>
                 <h2>Chadwick's OE Matchmaker</h2>
                 {this.renderMainView()}
@@ -38,8 +38,11 @@ class IndexPage extends React.Component {
         if (this.state.chooseState === 0) {
             return (
                 <div>
-                    <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => { this.onClickSignIn() }}>Sign In</button>
-                    {this.state.signinError ? <p id="error-display">An unexpected error occurred: {this.state.signinError}</p> : ''}
+                    <button type="button" className="main-button" onClick={() => { this.onClickSignIn() }}>
+                        <img src="/static/res/google-icon.png" className="sign-in-icon" />
+                        Sign In
+                    </button>
+                    {this.state.signinError ? <p className="error-display">An unexpected error occurred: {this.state.signinError}</p> : ''}
                 </div>
             );
         }
@@ -150,6 +153,10 @@ class IndexPage extends React.Component {
         let db = firebase.firestore();
 
         return db.collection("user-records").doc(username).get().then((snapshot) => {
+            if (snapshot.data() === undefined) {
+                throw new Error('You are not a current student.');
+            }
+
             return snapshot.data();
         });
     };
