@@ -1,0 +1,25 @@
+{
+  "name": "outie",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "(cd web/src/js && babel ./** --out-dir ../dist/ --presets react-app/prod)",
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-preset-react-app": "^3.1.2",
+    "express": "^4.16.4",
+    "firebase-admin": "^7.3.0",
+    "handlebars": "^4.1.2",
+    "lodash": "^4.17.11"
+  },
+  "devDependencies": {
+    "@types/node": "^11.13.8"
+  }
+}
