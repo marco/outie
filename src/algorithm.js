@@ -1,9 +1,9 @@
 let database = require('../src/database.js').get();
 let _ = require('lodash');
 
-const GENDER_OFFSET = 2;
-const TOTAL_OFFSET = 2;
-const RUN_AMOUNT = 1000;
+const GENDER_OFFSET = 0;
+const TOTAL_OFFSET = 0;
+const RUN_AMOUNT = 1;
 let gradeName = process.argv[2];
 let groupAmount = process.argv[3];
 
@@ -51,8 +51,8 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise) {
         let users = results[1];
         let totalUsersCount = Object.keys(users).length
 
-        let maxGroupSize = Math.ceil(totalUsersCount / groupAmount) + TOTAL_OFFSET;
-        let maxGroupGenderSize = Math.ceil((totalUsersCount / groupAmount) / 2) + GENDER_OFFSET;
+        let maxGroupSize = Math.floor(totalUsersCount / groupAmount) + TOTAL_OFFSET;
+        let maxGroupGenderSize = Math.floor((totalUsersCount / groupAmount) / 2) + GENDER_OFFSET;
 
         // For now, just focus on listed preferences, since users who filled out the ranking
         // should get priority over those who didn't
@@ -122,16 +122,22 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise) {
                 continue;
             }
 
-            // Loop through all groups twice. The first time, check if they have
+            // Loop through all groups 3 times. The first time, check if they have
             // space, ignoring preference. Next, check if they have space ignoring
-            // preference and gender.
-            for (let j = 0; j < groups.length * 2; j++) {
-                let genderSize = j < groups.length ? maxGroupGenderSize : Infinity;
+            // preference and gender. Finally, check ignoring all constraints.
+            for (let j = 0; j < groups.length * 3; j++) {
+                let effectiveGenderSize = j < groups.length ? maxGroupGenderSize : Infinity;
+                let effectiveGroupSize = j < groups.length * 2 ? maxGroupSize : Infinity;
 
-                if (hasMaximum(groups[j], users[allUsernames[i]].isMale, maxGroupSize, genderSize, users)) {
+                if (hasMaximum(groups[j], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, users)) {
                     continue;
                 }
 
+                // Theoretically, adding regardless of preference here isn't ideal.
+                // However, since the only users who aren't placed are those who
+                // have the lowest GU scores anyway, it makes sense that they would have
+                // less choice in the decision-making. Also, randomness makes
+                // this more "fair" as well.
                 groups[j].push(allUsernames[i]);
                 continue allUsernamesLoop;
             }
@@ -330,9 +336,19 @@ let output = function outputResults(groups, preferences, users, details) {
     let minGenderRatio = _.min(genderRatios);
 
     let currentPlacedCount = 0;
+    let currentBiggestGroupSize = 0;
+    let currentSmallestGroupSize = Infinity;
 
     for (let i = 0; i < groups.length; i++) {
         currentPlacedCount += groups[i].length;
+
+        if (groups[i].length > currentBiggestGroupSize) {
+            currentBiggestGroupSize = groups[i].length;
+        }
+
+        if (groups[i].length < currentSmallestGroupSize) {
+            currentSmallestGroupSize = groups[i].length;
+        }
     }
 
     let placedPercent = currentPlacedCount / Object.keys(users).length;
@@ -341,12 +357,17 @@ let output = function outputResults(groups, preferences, users, details) {
     console.log('### GROUPS: ###');
     console.log(groups);
     console.log('### DETAILS: ###');
-    console.log(' - Max Group Size');
+    console.log(' - Maximum Group Size');
     console.log(details.maxGroupSize);
     console.log(' - Group Count');
     console.log(details.groupAmount);
     console.log(' - User Count');
     console.log(Object.keys(users).length);
+    console.log('### RESULTS: ###');
+    console.log(' - Biggest Group Size');
+    console.log(currentBiggestGroupSize);
+    console.log(' - Smallest Group Size');
+    console.log(currentSmallestGroupSize);
     console.log('### STATS: ###');
     console.log(' - Placed %');
     console.log(getPercent(placedPercent));
