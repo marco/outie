@@ -6,13 +6,12 @@ class IndexPage extends React.Component {
         super(props);
 
         this.state = {
-            currentUserDetails: undefined,
-            currentGradeDetails: undefined,
-            chooseState: 0,
+            userDetails: undefined,
+            gradeDetails: undefined,
+            preferences: [],
             signinError: '',
-            studentSelection0: PLACEHOLDER_NAME,
-            studentSelection1: PLACEHOLDER_NAME,
-            studentSelection2: PLACEHOLDER_NAME,
+            authState: 0,
+            hasSaved: undefined,
         };
     }
 
@@ -27,59 +26,85 @@ class IndexPage extends React.Component {
     }
 
     componentDidMount() {
-        if (!firebase.auth().currentUser) {
-            this.setState({ chooseState: 0 });
-        } else {
-            this.fetchDetails(firebase.auth().currentUser.email);
-        }
+        firebase.auth().onAuthStateChanged((user) => {
+            if (user) {
+                this.fetchDetails(firebase.auth().currentUser.email);
+            } else {
+                this.setState({ authState: 1 });
+            }
+        });
     }
 
     renderMainView() {
-        if (this.state.chooseState === 0) {
+        if (this.state.authState === 0) {
+            return <div><p>Loading...</p></div>;
+        }
+
+        if (this.state.authState === 1) {
             return (
                 <div>
                     <button type="button" className="main-button" onClick={() => { this.onClickSignIn() }}>
                         <img src="/static/res/google-icon.png" className="sign-in-icon" />
                         Sign In
                     </button>
-                    {this.state.signinError ? <p className="error-display">An unexpected error occurred: {this.state.signinError}</p> : ''}
+                    {this.state.signinError ? <p className="error-display">{this.state.signinError}</p> : ''}
                 </div>
             );
         }
 
-        if (this.state.chooseState === 1) {
+        if (!this.state.gradeDetails.nextTrip) {
+            return <div><p>There are no upcoming trips. Please check back later.</p></div>;
+        }
+
+        if (this.state.hasSaved) {
             return (
                 <div>
-                    <p>{ 'There are no upcoming trips. '}</p>
-                    <h3>Pick your friends!</h3>
-                    <p>Note, the order of your selections does not matter.</p>
-                    <label>First Choice</label>
-                    {this.renderFriendOptions(0)}
-                    <label>Second Choice</label>
-                    {this.renderFriendOptions(1)}
-                    <label>Third Choice</label>
-                    {this.renderFriendOptions(2)}
-                    {this.renderSubmitButton()}
+                    <p>Next trip: {this.state.gradeDetails.nextTrip}</p>
+                    <p>Your preferences have been saved.</p>
+                    <button type="button" onClick={() => { this.onClickChange() }}>Change your Preferences</button>
                 </div>
             )
         }
+
+        return (
+            <div>
+                <p>Next trip: {this.state.gradeDetails.nextTrip}</p>
+                <h3>Pick your friends!</h3>
+                <p>Note, the order of your selections does not matter.</p>
+                <div className="selections">
+                    <div className="input-group">
+                        <label>First Choice</label>
+                        {this.renderFriendOptions(0)}
+                    </div>
+                    <div className="input-group">
+                        <label>Second Choice</label>
+                        {this.renderFriendOptions(1)}
+                    </div>
+                    <div className="input-group">
+                        <label>Third Choice</label>
+                        {this.renderFriendOptions(2)}
+                    </div>
+                </div>
+                {this.renderSubmitButton()}
+            </div>
+        );
     }
 
     renderFriendOptions(id) {
-        let studentOptions = _.map(this.state.currentGradeDetails.students, (student, key) => {
+        let studentOptions = _.map(this.state.gradeDetails.students, (student, key) => {
             return <option value={key}>{student}</option>;
         });
 
-        studentOptions.unshift(<option disabled>{PLACEHOLDER_NAME}</option>);
+        studentOptions.unshift(<option disabled value={PLACEHOLDER_NAME}>{PLACEHOLDER_NAME}</option>);
 
-        let name = 'studentSelection' + id;
-        return <select value={this.state[name]} name={name} onChange={(event) => { this.onUpdateSelection(event); }}>{studentOptions}</select>;
+        let value = this.state.preferences[id] || PLACEHOLDER_NAME;
+        return <select value={value} data-select-id={id} onChange={(event) => { this.onUpdateSelection(event); }}>{studentOptions}</select>;
     }
 
     renderSubmitButton() {
-        let selections = this.getSelectionArray();
+        let selections = this.state.preferences;
 
-        for (let i = 0; i < selections.length; i++) {
+        for (let i = 0; i < FRIEND_CHOICES; i++) {
             if (!selections[i] || selections[i] === PLACEHOLDER_NAME) {
                 return undefined;
             }
@@ -89,7 +114,7 @@ class IndexPage extends React.Component {
             return undefined;
         }
 
-        return <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => { this.onClickSubmit() }}>Submit</button>
+        return <button type="button" onClick={() => { this.onClickSubmit() }}>Submit</button>
     }
 
     onClickSignIn() {
@@ -109,34 +134,57 @@ class IndexPage extends React.Component {
         let db = firebase.firestore();
         let username = this.getUsername(firebase.auth().currentUser.email);
 
-        return db.collection('preferences').doc(this.state.currentUserDetails.grade).set({
-            [username]: this.getSelectionArray(),
-        }, { merge: true });
+        return db.collection('preferences').doc(this.state.userDetails.grade).set({
+            [username]: this.state.preferences,
+        }, { merge: true }).then(() => {
+            this.setState({
+                hasSaved: true,
+            });
+        });
+    }
+
+    onClickChange() {
+        this.setState({
+            hasSaved: false,
+        });
     }
 
     onUpdateSelection(event) {
+        let newPreferences = this.state.preferences.slice();
+        newPreferences[parseInt(event.target.dataset.selectId)] = event.target.value;
+
         this.setState({
-            [event.target.name]: event.target.value,
+            preferences: newPreferences,
         });
     }
 
     fetchDetails(email) {
         let username = this.getUsername(email);
-        let currentUser;
+        let userDetails;
+        let gradeDetails;
 
         return this.getUserDetails(username).then((user) => {
-            currentUser = user;
+            userDetails = user;
             return this.getGradeDetails(user.grade);
         }).then((grade) => {
+            gradeDetails = grade;
+            console.log(gradeDetails);
+            return this.getPreferencesDetails(userDetails.grade, username);
+        }).then((preferences) => {
             this.setState({
-                currentGradeDetails: grade,
-                currentUserDetails: currentUser,
-                chooseState: currentUser.preferences ? 2 : 1,
+                gradeDetails,
+                userDetails,
+                preferences,
+                hasSaved: preferences.length !== 0,
+                authState: 2,
             });
         }).catch((error) => {
             this.setState({
                 signinError: error.message,
-                chooseState: 0,
+                gradeDetails: undefined,
+                userDetails: undefined,
+                preferences: undefined,
+                authState: 1,
             });
         });
     }
@@ -161,16 +209,20 @@ class IndexPage extends React.Component {
         });
     };
 
+    getPreferencesDetails(grade, username) {
+        let db = firebase.firestore();
+
+        return db.collection("preferences").doc(grade).get().then((snapshot) => {
+            if (!snapshot.data()) {
+                return [];
+            }
+
+            return snapshot.data()[username] || [];
+        });
+    };
+
     getUsername(email) {
         return email.substring(0, email.indexOf("@"));
-    }
-
-    getSelectionArray() {
-        return [
-            this.state.studentSelection0,
-            this.state.studentSelection1,
-            this.state.studentSelection2,
-        ];
     }
 }
 

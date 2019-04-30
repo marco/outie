@@ -37,6 +37,11 @@ body {
         font-weight: 400;
     }
 
+    h3 {
+        font-size: 24px;
+        margin: 30px 0px 0px;
+    }
+
     button {
         width: 200px;
         height: 60px;
@@ -67,6 +72,19 @@ body {
 
     .error-display {
         margin: 30px 0px 0px;
+    }
+
+    .selections {
+        margin: 30px 0px;
+
+        .input-group {
+            margin: 15px 0px;
+
+
+            label {
+                margin-right: 10px;
+            }
+        }
     }
 }
 
