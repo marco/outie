@@ -6,7 +6,8 @@
   "scripts": {
     "build": "sh build.sh",
     "start": "node index.js",
-    "listen": "sh build-dev.sh & npm start"
+    "listen": "sh build-dev.sh & npm start",
+    "choose": "node --max-old-space-size=8192 src/algorithm.js"
   },
   "keywords": [],
   "author": "",
