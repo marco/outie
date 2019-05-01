@@ -12,6 +12,14 @@ let preferencesPromise = db.collection('preferences').doc(gradeName).get().then(
     return snapshot.data();
 });
 
+let antiPreferencesPromise = db.collection('anti-preferences').doc(gradeName).get().then((snapshot) => {
+    return snapshot.data().antiPreferences;
+});
+
+let studentNamesPromise = db.collection('grades').doc(gradeName).get().then((snapshot) => {
+    return snapshot.data().students;
+});
+
 let usersPromise = db.collection('user-records').get().then((snapshot) => {
     let users = {};
     let docs = snapshot.docs;
@@ -35,17 +43,23 @@ let usersPromise = db.collection('user-records').get().then((snapshot) => {
  * @param {Promise<Object>} usersPromise A promise of user details,
  * where keys are usernames and values are user details such as `isMale` and
  * `grade`.
+ * @param {Promise<string[]>} antiPreferencesPromise A promise of user pairs that
+ * cannot be paired together. The format is the usernames in alphebetical order
+ * hyphenated.
+ * @param {number} runID The ID for this algorithm run, which is used for
+ * debugging purposes.
  * @return {Promise<Object>} A promise of an object with keys `groups`, `preferences`,
  * and `users`, where `groups` is the array of member arrays for each group,
  * `preferences` is the result of `preferencesPromise`, and `users` is the result
  * of usersPromise.
  */
-let run = function runAlgorithmOnce(preferencesPromise, usersPromise, runID) {
-    return Promise.all([preferencesPromise, usersPromise]).then((results) => {
+let run = function runAlgorithmOnce(preferencesPromise, antiPreferencesPromise, usersPromise, runID) {
+    return Promise.all([preferencesPromise, usersPromise, antiPreferencesPromise]).then((results) => {
         // `preferences` may be incomplete for users who haven't filled out the form,
         // but `users` will always be complete.
         let preferences = results[0];
         let users = results[1];
+        let antiPreferences = results[2];
         let totalUsersCount = Object.keys(users).length
 
         // These maximum values are not actually the largest number of users
@@ -55,13 +69,17 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise, runID) {
         // and must be added later alongside users without any preferences.
         let maxGroupSize = Math.floor(totalUsersCount / groupAmount);
         let maxGroupGenderSize = Math.floor((totalUsersCount / groupAmount) / 2);
-        let unfittingUsers = totalUsersCount % groupAmount;
 
         // For now, just focus on listed preferences, since users who filled out the ranking
         // should get priority over those who didn't
         let usernames = Object.keys(preferences);
         let allUsernames = Object.keys(users);
         let userOrder = _.shuffle(usernames);
+
+        // The number of caring users that cannot be fitted in the first
+        // round of groupings. In other, this is the number that cannot fit
+        // into even groups and must be added unevenly on top afterwards.
+        let unfittingUsers = usernames.length % groupAmount;
 
         // Groups start out empty.
         let groups = [];
@@ -90,6 +108,14 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise, runID) {
                 groups[groupID] = guRanked;
                 placedUsers.push(username);
 
+                // If it can't join because of an anti-preference, continue
+                // with the next attempt.
+                if (!canTryJoiningGroup(antiPreferences, guRanked, username)) {
+                    _.remove(placedUsers, username);
+
+                    continue ugRankLoop;
+                }
+
                 // If we're at the maximum, we have to remove the least-liked user
                 // of the same gender as the user we just added. This is potentially
                 // the same user as the new one.
@@ -99,9 +125,7 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise, runID) {
                             let removedUser = guRanked[k];
                             guRanked.splice(k, 1);
 
-                            placedUsers = placedUsers.filter((placedUser) => {
-                                return placedUser !== removedUser;
-                            });
+                            _.remove(placedUsers, removedUser);
 
                             if (username === removedUser) {
                                 continue ugRankLoop;
@@ -253,6 +277,29 @@ let getUGRanking = function findRankingOfGroupsByPreferences(preferences, groups
 }
 
 /**
+ * Returns whether or not a user can try to join a group. Note, this does not
+ * mean that the user can join; rather, it means that no-one in the group has
+ * an anti-preference against the user.
+ *
+ * @param {string[]} antiPreferences The array of hyphenated anti-preference
+ * combinations.
+ * @param {string[]} group The array of group member usernames.
+ * @param {string} username The username trying to join the group.
+ * @return {boolean} Whether or not the user should attempt joining the group.
+ */
+let canTryJoiningGroup = function canJoinWithoutConflict(antiPreferences, group, username) {
+    for (let i = 0; i < group.length; i++) {
+        let hyphenatedCombination = [group[i], username].sort().join('-');
+
+        if (antiPreferences.includes(hyphenatedCombination)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Returns a group's ranking of acceptable users. In other words, returns the
  * order of users with the most people who listed them as friends in the group
  * (most accepted) to the least (least accepted).
@@ -334,8 +381,10 @@ let getUGScore = function getUserGroupScore(preferences, group, member) {
  * @param {Object} preferences The preferences object, to be used in statistics.
  * @param {Object} users The user details object, to be used in statistics.
  * @param {Object} details The program details object, to be used in statistics.
+ * @param {Object} studentNames An object of usernames and their corresponding
+ * student names.
  */
-let output = function outputResults(groups, preferences, users, details) {
+let output = function outputResults(groups, preferences, users, details, studentNames) {
     let percentFavorabilities = groups.map((group) => {
         return getPercentFavorability(group, preferences);
     });
@@ -371,9 +420,10 @@ let output = function outputResults(groups, preferences, users, details) {
     let placedPercent = currentPlacedCount / Object.keys(users).length;
     let chosePercent = Object.keys(preferences).length / Object.keys(users).length;
     let minFriends = getMinFriends(groups, preferences);
+    let groupsWithNames = getGroupsWithNames(groups, studentNames);
 
     console.log('### GROUPS: ###');
-    console.log(groups);
+    console.log(groupsWithNames);
     console.log('### DETAILS: ###');
     console.log(' - Maximum Group Size');
     console.log(details.maxGroupSize);
@@ -407,6 +457,23 @@ let output = function outputResults(groups, preferences, users, details) {
     console.log(getPercent(maxGenderRatio));
     console.log(' - Min male %');
     console.log(getPercent(minGenderRatio));
+}
+
+/**
+ * Converts an array of groups containing usernames into an array of groups
+ * containing students' full names.
+ *
+ * @param {string[][]} groups The groups, each containing an array of usernames.
+ * @param {Object} studentNames An object of usernames and their corresponding
+ * student names.
+ * @return {string[][]} The new group array with student names.
+ */
+let getGroupsWithNames = function getGroupsWithFullNames(groups, studentNames) {
+    return groups.map((group) => {
+        return group.map((username) => {
+            return studentNames[username];
+        });
+    });
 }
 
 /**
@@ -470,29 +537,35 @@ let runMany = function runAlgorithmAndFindBest(runAmount) {
     let runningPromises = [];
 
     for (let i = 0; i < runAmount; i++) {
-        runningPromises.push(run(preferencesPromise, usersPromise, i));
+        runningPromises.push(run(preferencesPromise, antiPreferencesPromise, usersPromise, i));
     }
 
     return Promise.all(runningPromises).then((results) => {
-        let currentBestMPF = -1;
-        let currentBestIndex;
+        // Sort by the minimum friends number, the number of usernames with that
+        // number, and finally the minimum favorability percent for finding the
+        // "best."
+        let bestResult = _.sortBy(results, [
+            (result) => {
+                let minFriends = getMinFriends(result.groups, result.preferences);
+                return minFriends.minFriends;
+            },
+            (result) => {
+                let minFriends = getMinFriends(result.groups, result.preferences);
+                return minFriends.usernames.length;
+            },
+            (result) => {
+                // The minimum percent favorability should be as high as
+                // possible, so it should be negative.
+                let percentFavorabilities = result.groups.map((group) => {
+                    return getPercentFavorability(group, result.preferences);
+                });
+                return -_.min(percentFavorabilities);
+            },
+        ])[0];
 
-        for (let i = 0; i < results.length; i++) {
-            let result = results[i];
-
-            let percentFavorabilities = result.groups.map((group) => {
-                return getPercentFavorability(group, result.preferences);
-            });
-
-            let minPercentFavorability = _.min(percentFavorabilities);
-            if (minPercentFavorability > currentBestMPF) {
-                currentBestMPF = minPercentFavorability;
-                currentBestIndex = i;
-            }
-        }
-
-        let finalResult = results[currentBestIndex];
-        output(finalResult.groups, finalResult.preferences, finalResult.users, finalResult.details);
+        studentNamesPromise.then((students) => {
+            output(bestResult.groups, bestResult.preferences, bestResult.users, bestResult.details, students);
+        });
     });
 }
 
