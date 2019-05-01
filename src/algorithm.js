@@ -1,11 +1,10 @@
 let database = require('../src/database.js').get();
 let _ = require('lodash');
 
-const GENDER_OFFSET = 0;
-const TOTAL_OFFSET = 0;
-const RUN_AMOUNT = 1;
 let gradeName = process.argv[2];
-let groupAmount = process.argv[3];
+let groupAmount = parseInt(process.argv[3]);
+let runAmount =  parseInt(process.argv[4]);
+let debugEachCompletion = process.argv[5] === '--verbose';
 
 let db = database.firestore();
 
@@ -18,10 +17,8 @@ let usersPromise = db.collection('user-records').get().then((snapshot) => {
     let docs = snapshot.docs;
 
     docs.forEach((doc) => {
-        if (doc.data().grade) {
-            if (doc.data().grade !== gradeName) {
-                return;
-            }
+        if (!doc.data().grade || doc.data().grade !== gradeName) {
+            return;
         }
 
         users[doc.id] = doc.data();
@@ -43,7 +40,7 @@ let usersPromise = db.collection('user-records').get().then((snapshot) => {
  * `preferences` is the result of `preferencesPromise`, and `users` is the result
  * of usersPromise.
  */
-let run = function runAlgorithmOnce(preferencesPromise, usersPromise) {
+let run = function runAlgorithmOnce(preferencesPromise, usersPromise, runID) {
     return Promise.all([preferencesPromise, usersPromise]).then((results) => {
         // `preferences` may be incomplete for users who haven't filled out the form,
         // but `users` will always be complete.
@@ -51,8 +48,14 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise) {
         let users = results[1];
         let totalUsersCount = Object.keys(users).length
 
-        let maxGroupSize = Math.floor(totalUsersCount / groupAmount) + TOTAL_OFFSET;
-        let maxGroupGenderSize = Math.floor((totalUsersCount / groupAmount) / 2) + GENDER_OFFSET;
+        // These maximum values are not actually the largest number of users
+        // allowed per group; rather, they are the maximum amount to initially
+        // fill in when doing user rankings and placements. `unfittingUsers`
+        // is the amount of users with preferences who couldn't be fit initially
+        // and must be added later alongside users without any preferences.
+        let maxGroupSize = Math.floor(totalUsersCount / groupAmount);
+        let maxGroupGenderSize = Math.floor((totalUsersCount / groupAmount) / 2);
+        let unfittingUsers = totalUsersCount % groupAmount;
 
         // For now, just focus on listed preferences, since users who filled out the ranking
         // should get priority over those who didn't
@@ -112,24 +115,34 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise) {
                 break ugRankLoop;
             }
 
-            if (i === userOrder.length - 1 && placedUsers.length !== userOrder.length) {
+            if (i === userOrder.length - 1 && placedUsers.length + unfittingUsers < userOrder.length) {
                 i = -1;
             }
         }
 
+        // Loop through all unplaced users, including both those who didn't list
+        // preferences as well as the few who couldn't even be fit within
+        // the initial maximum limits.
         allUsernamesLoop: for (let i = 0; i < allUsernames.length; i++) {
             if (placedUsers.includes(allUsernames[i])) {
                 continue;
             }
 
+            // Sort the groups by size, so that smaller groups are tried first
+            // before larger ones get filled. This prevents the same groups.
+            // from filling at the end and getting disproportionately larger.
+            let sizeSortedGroups = groups.sort((groupA, groupB) => {
+                return groupA.length - groupB.length;
+            });
+
             // Loop through all groups 3 times. The first time, check if they have
             // space, ignoring preference. Next, check if they have space ignoring
             // preference and gender. Finally, check ignoring all constraints.
-            for (let j = 0; j < groups.length * 3; j++) {
-                let effectiveGenderSize = j < groups.length ? maxGroupGenderSize : Infinity;
-                let effectiveGroupSize = j < groups.length * 2 ? maxGroupSize : Infinity;
+            for (let j = 0; j < sizeSortedGroups.length * 3; j++) {
+                let effectiveGenderSize = j < sizeSortedGroups.length ? maxGroupGenderSize : Infinity;
+                let effectiveGroupSize = j < sizeSortedGroups.length * 2 ? maxGroupSize : Infinity;
 
-                if (hasMaximum(groups[j], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, users)) {
+                if (hasMaximum(sizeSortedGroups[j], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, users)) {
                     continue;
                 }
 
@@ -138,9 +151,13 @@ let run = function runAlgorithmOnce(preferencesPromise, usersPromise) {
                 // have the lowest GU scores anyway, it makes sense that they would have
                 // less choice in the decision-making. Also, randomness makes
                 // this more "fair" as well.
-                groups[j].push(allUsernames[i]);
+                sizeSortedGroups[j].push(allUsernames[i]);
                 continue allUsernamesLoop;
             }
+        }
+
+        if (debugEachCompletion) {
+            console.log('Iteration ' + runID + ' has been completed.');
         }
 
         return {
@@ -353,6 +370,7 @@ let output = function outputResults(groups, preferences, users, details) {
 
     let placedPercent = currentPlacedCount / Object.keys(users).length;
     let chosePercent = Object.keys(preferences).length / Object.keys(users).length;
+    let minFriends = getMinFriends(groups, preferences);
 
     console.log('### GROUPS: ###');
     console.log(groups);
@@ -379,6 +397,10 @@ let output = function outputResults(groups, preferences, users, details) {
     console.log(getPercent(maxPercentFavorability));
     console.log(' - Min favorability %');
     console.log(getPercent(minPercentFavorability));
+    console.log(' - Min friends')
+    console.log(minFriends.minFriends);
+    console.log(' - Min friends users')
+    console.log(minFriends.usernames.join(' '));
     console.log(' - Avg male %');
     console.log(getPercent(avgGenderRatio));
     console.log(' - Max male %');
@@ -444,11 +466,11 @@ let getPercent = function getPercentString(number) {
  *
  * @return {Promise} A promise that resolves when the best group has been found.
  */
-let runMany = function runAlgorithmAndFindMest() {
+let runMany = function runAlgorithmAndFindBest(runAmount) {
     let runningPromises = [];
 
-    for (let i = 0; i < RUN_AMOUNT; i++) {
-        runningPromises.push(run(preferencesPromise, usersPromise));
+    for (let i = 0; i < runAmount; i++) {
+        runningPromises.push(run(preferencesPromise, usersPromise, i));
     }
 
     return Promise.all(runningPromises).then((results) => {
@@ -474,4 +496,54 @@ let runMany = function runAlgorithmAndFindMest() {
     });
 }
 
-runMany();
+/**
+ * Returns the lowest number of friends for any registered user in any group.
+ * In other words, this is the minimum number of friends of any user who
+ * listed preferences.
+ *
+ * @param {string[]} groups The array of groups to check.
+ * @param {Object} preferences The preferences object to use when determining
+ * friendship counts.
+ * @return {Object} An object containing a `minFriends` key of the minimum
+ * friends value and a `usernames` key containing all users with that number
+ * of friends.
+ */
+let getMinFriends = function getMinimumFriendsScore(groups, preferences) {
+    let currentMinFriends = Infinity;
+    let currentUsersWithMinFriends = [];
+
+    for (let i = 0; i < groups.length; i++) {
+        let group = groups[i];
+
+        for (let j = 0; j < group.length; j++) {
+            let username = group[j];
+
+            // If they don't have preferences, they shouldn't be analyzed.
+            if (!preferences[username]) {
+                continue;
+            }
+
+            let friends = preferences[username];
+            let currentFriendsCount = 0;
+
+            for (let k = 0; k < group.length; k++) {
+                if (friends.includes(group[k])) {
+                    currentFriendsCount++;
+                }
+            }
+
+            if (currentFriendsCount === currentMinFriends) {
+                currentUsersWithMinFriends.push(username)
+            }
+
+            if (currentFriendsCount < currentMinFriends) {
+                currentMinFriends = currentFriendsCount;
+                currentUsersWithMinFriends = [username];
+            }
+        }
+    }
+
+    return { minFriends: currentMinFriends, usernames: currentUsersWithMinFriends };
+}
+
+runMany(runAmount);
