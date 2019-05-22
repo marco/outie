@@ -1,5 +1,5 @@
 let fs = require('fs');
-let database = require('../src/database.js').get();
+let database = require('./database.js').get();
 
 let studentsFilename = process.argv[2];
 let preferencesFilename = process.argv[3];
