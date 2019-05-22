@@ -1,0 +1,22 @@
+{
+    "parser": "@typescript-eslint/parser",
+    "plugins": ["@typescript-eslint", "react"],
+    "parserOptions": {
+        "project": "server/tsconfig.json",
+        "ecmaVersion": 6,
+        "sourceType": "module"
+    },
+    "extends": ["plugin:@typescript-eslint/recommended",  "eslint:recommended", "plugin:react/recommended"],
+    "rules": {
+        "@typescript-eslint/no-non-null-assertion": "off",
+        "@typescript-eslint/explicit-function-return-type": ["warn", {
+            "allowExpressions": true
+        }],
+        "@typescript-eslint/no-explicit-any": "off"
+    },
+    "env": {
+        "browser": true,
+        "node": true,
+        "es6": true
+    }
+}

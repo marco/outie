@@ -60,7 +60,10 @@ let usersPromise = db.collection('user-records').get().then((snapshot) => {
     })
 
     return users;
-}).catch((error: Error) => console.log(error)) as Promise<UserDetails>;
+}).catch((error: Error) => {
+    /* eslint-disable-next-line no-console */
+    console.log(error);
+}) as Promise<UserDetails>;
 
 /**
  * Creates a group with a new member.
@@ -433,6 +436,7 @@ let output = function outputResults(
     let minFriends = getMinFriends(groups, preferences);
     let groupsWithNames = getGroupsWithNames(groups, studentNames);
 
+    /* eslint-disable no-console */
     console.log('### GROUPS: ###');
     console.log(groupsWithNames);
     console.log('### DETAILS: ###');
@@ -468,6 +472,7 @@ let output = function outputResults(
     console.log(getPercent(maxGenderRatio));
     console.log(' - Min male %');
     console.log(getPercent(minGenderRatio));
+    /* eslint-enable no-console */
 }
 
 
@@ -633,6 +638,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
         }
 
         if (debugEachCompletion) {
+            /* eslint-disable-next-line no-console */
             console.log('Iteration ' + runID + ' has been completed.');
         }
 
