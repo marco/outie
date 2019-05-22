@@ -5,7 +5,8 @@ let database = databaseSource.get();
 let gradeName = process.argv[2];
 let groupAmount = parseInt(process.argv[3]);
 let runAmount =  parseInt(process.argv[4]);
-let debugEachCompletion = process.argv[5] === '--verbose';
+let oneGenderGroups = process.argv[5] === 'true';
+let debugEachCompletion = process.argv[6] === '--verbose';
 
 let db = database.firestore();
 
@@ -80,11 +81,22 @@ let groupWithNew = function copyGroupWithNewMember(group: Group, member: Usernam
  *
  * @param {string[]} group The list of usernames to check.
  * @param {boolean} isMale Whether the gender to check is male.
- * @param {number} maxAmount The maximum number of the gender to allow.
+ * @param {number} maxAmount The maximum number of members to allow in the group.
+ * @param {number} maxAmountSame The maximum number of the same gender to allow.
  * @param {Object} users The user detail object, containing information for usernames.
+ * @param {boolean} oneGender Whether or not this group should be one-gendered.
+ * If not one-gendered, then the group will use `maxAmountSame` to determine
+ * eligibility.
  * @return {boolean} Whether or not it has reached the maximum.
  */
-let hasMaximum = function checkGenderHasMaximum(group: Group, isMale: boolean, maxAmount: number, maxAmountSame: number, users: UserDetails): boolean {
+let hasMaximum = function checkGenderHasMaximum(
+    group: Group,
+    isMale: boolean,
+    maxAmount: number,
+    maxAmountSame: number,
+    oneGender: boolean,
+    users: UserDetails
+): boolean {
     let currentAmountSame = 0;
     let currentAmount = 0;
 
@@ -94,6 +106,12 @@ let hasMaximum = function checkGenderHasMaximum(group: Group, isMale: boolean, m
         if (users[group[i]].isMale === isMale) {
             currentAmountSame++;
         }
+    }
+
+    if (oneGender) {
+        // If it's a one-gender group, it fails if there are any non-same
+        // gendered people.
+        return currentAmount !== currentAmountSame || currentAmount > maxAmount;
     }
 
     // Add one to the amounts, since if a new user is added it should still
@@ -531,7 +549,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                 // If we're at the maximum, we have to remove the least-liked user
                 // of the same gender as the user we just added. This is potentially
                 // the same user as the new one.
-                if (hasMaximum(guRanked, user.isMale, maxGroupSize, maxGroupGenderSize, users)) {
+                if (hasMaximum(guRanked, user.isMale, maxGroupSize, maxGroupGenderSize, oneGenderGroups, users)) {
                     for (let k = guRanked.length - 1; k >= 0; k--) {
                         if (users[guRanked[k]].isMale === user.isMale) {
                             let removedUser = guRanked[k];
@@ -600,7 +618,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                     continue;
                 }
 
-                if (hasMaximum(sizeSortedGroups[j % 3], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, users)) {
+                if (hasMaximum(sizeSortedGroups[j % 3], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, oneGenderGroups, users)) {
                     continue;
                 }
 
