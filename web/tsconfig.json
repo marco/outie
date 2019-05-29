@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "strict": true,
+        "outDir": "./dist/script",
+        "allowJs": true,
+        "resolveJsonModule": true,
+        "jsx": "react"
+    },
+    "include": [
+        "./src/script/**/*"
+    ]
+}

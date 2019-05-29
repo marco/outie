@@ -1,10 +1,11 @@
 
-src/firebase-service-key.json
+server/config/firebase-service-key.json
+server/dist
+web/src/config/firebase.json
 web/dist
 
-
-# Created by https://www.gitignore.io/api/node,macos,firebase
-# Edit at https://www.gitignore.io/?templates=node,macos,firebase
+# Created by https://www.gitignore.io/api/node,macos,firebase,visualstudiocode
+# Edit at https://www.gitignore.io/?templates=node,macos,firebase,visualstudiocode
 
 ### Firebase ###
 .idea
@@ -128,5 +129,16 @@ typings/
 
 # DynamoDB Local files
 .dynamodb/
+
+### VisualStudioCode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+### VisualStudioCode Patch ###
+# Ignore all local history of files
+.history
 
 # End of https://www.gitignore.io/api/node,macos,firebase

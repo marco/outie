@@ -1,8 +1,18 @@
-const FRIEND_CHOICES = 3;
+import * as firebaseConfig from '../config/firebase.json';
+import * as firebase from 'firebase/app';
+import 'firebase/firestore';
+import 'firebase/auth';
+import * as React from 'react';
+import * as ReactDOM from 'react-dom'
+import * as _ from 'lodash';
+import '../style/index.scss';
+import * as GoogleIcon from '../res/google-icon.png';
+
+const FRIEND_CHOICES = ['First', 'Second', 'Third', 'Fourth', 'Fifth'];
 const PLACEHOLDER_NAME = 'Select';
 
-class IndexPage extends React.Component {
-    constructor(props) {
+class IndexPage extends React.Component<{}, Record<string, any>> {
+    public constructor(props: {}) {
         super(props);
 
         this.state = {
@@ -15,27 +25,29 @@ class IndexPage extends React.Component {
         };
     }
 
-    render() {
+    public render(): JSX.Element {
         return (
             <div className="inner-root">
                 <h1>Outie</h1>
-                <h2>Chadwick's OE Matchmaker</h2>
+                <h2>Chadwick&apos;s OE Matchmaker</h2>
                 {this.renderMainView()}
             </div>
         );
     }
 
-    componentDidMount() {
+    public componentDidMount(): void {
+        firebase.initializeApp(firebaseConfig);
+
         firebase.auth().onAuthStateChanged((user) => {
             if (user) {
-                this.fetchDetails(firebase.auth().currentUser.email);
+                this.fetchDetails(user.email!);
             } else {
                 this.setState({ authState: 1 });
             }
         });
     }
 
-    renderMainView() {
+    private renderMainView(): JSX.Element {
         if (this.state.authState === 0) {
             return <div><p>Loading...</p></div>;
         }
@@ -44,7 +56,7 @@ class IndexPage extends React.Component {
             return (
                 <div>
                     <button type="button" className="main-button" onClick={() => { this.onClickSignIn() }}>
-                        <img src="/static/res/google-icon.png" className="sign-in-icon" />
+                        <img src={GoogleIcon} className="sign-in-icon" />
                         Sign In
                     </button>
                     {this.state.signinError ? <p className="error-display">{this.state.signinError}</p> : ''}
@@ -72,25 +84,14 @@ class IndexPage extends React.Component {
                 <h3>Pick your friends!</h3>
                 <p>Note, the order of your selections does not matter.</p>
                 <div className="selections">
-                    <div className="input-group">
-                        <label>First Choice</label>
-                        {this.renderFriendOptions(0)}
-                    </div>
-                    <div className="input-group">
-                        <label>Second Choice</label>
-                        {this.renderFriendOptions(1)}
-                    </div>
-                    <div className="input-group">
-                        <label>Third Choice</label>
-                        {this.renderFriendOptions(2)}
-                    </div>
+                    {this.renderAllFriendOptions()}
                 </div>
                 {this.renderSubmitButton()}
             </div>
         );
     }
 
-    renderFriendOptions(id) {
+    private renderFriendOptions(id: number): JSX.Element {
         let studentOptions = _.map(this.state.gradeDetails.students, (student, key) => {
             return <option value={key}>{student}</option>;
         });
@@ -98,13 +99,28 @@ class IndexPage extends React.Component {
         studentOptions.unshift(<option disabled value={PLACEHOLDER_NAME}>{PLACEHOLDER_NAME}</option>);
 
         let value = this.state.preferences[id] || PLACEHOLDER_NAME;
-        return <select value={value} data-select-id={id} onChange={(event) => { this.onUpdateSelection(event); }}>{studentOptions}</select>;
+        return <select value={value} onChange={(event) => { this.onUpdateSelection(event, id); }}>{studentOptions}</select>;
     }
 
-    renderSubmitButton() {
+    private renderAllFriendOptions(): JSX.Element[] {
+        let selections = [];
+
+        for (let i = 0; i < FRIEND_CHOICES.length; i++) {
+            selections.push(
+                <div className="input-group">
+                    <label>{FRIEND_CHOICES[i]} Choice</label>
+                    {this.renderFriendOptions(i)}
+                </div>
+            );
+        }
+
+        return selections;
+    }
+
+    private renderSubmitButton(): JSX.Element | void {
         let selections = this.state.preferences;
 
-        for (let i = 0; i < FRIEND_CHOICES; i++) {
+        for (let i = 0; i < FRIEND_CHOICES.length; i++) {
             if (!selections[i] || selections[i] === PLACEHOLDER_NAME) {
                 return undefined;
             }
@@ -117,7 +133,7 @@ class IndexPage extends React.Component {
         return <button type="button" onClick={() => { this.onClickSubmit() }}>Submit</button>
     }
 
-    onClickSignIn() {
+    private onClickSignIn(): void {
         let provider = new firebase.auth.GoogleAuthProvider();
 
         provider.setCustomParameters({
@@ -125,16 +141,20 @@ class IndexPage extends React.Component {
         });
 
         firebase.auth().signInWithPopup(provider).then((result) => {
-            let email = result.user.email;
+            if (!result.user) {
+                throw new Error('Sorry, you could not be signed in.');
+            }
+
+            let email = result.user.email!;
             return this.fetchDetails(email);
         });
     }
 
-    onClickSubmit() {
+    private onClickSubmit(): void {
         let db = firebase.firestore();
-        let username = this.getUsername(firebase.auth().currentUser.email);
+        let username = this.getUsername(firebase.auth().currentUser!.email!);
 
-        return db.collection('preferences').doc(this.state.userDetails.grade).set({
+        db.collection('preferences').doc(this.state.userDetails.grade).set({
             [username]: this.state.preferences,
         }, { merge: true }).then(() => {
             this.setState({
@@ -143,32 +163,35 @@ class IndexPage extends React.Component {
         });
     }
 
-    onClickChange() {
+    private onClickChange(): void {
         this.setState({
             hasSaved: false,
         });
     }
 
-    onUpdateSelection(event) {
+    private onUpdateSelection(event: React.ChangeEvent, id: number): void {
         let newPreferences = this.state.preferences.slice();
-        newPreferences[parseInt(event.target.dataset.selectId)] = event.target.value;
+        newPreferences[id] = (event.target as HTMLInputElement).value;
 
         this.setState({
             preferences: newPreferences,
         });
     }
 
-    fetchDetails(email) {
+    private fetchDetails(email: string): Promise<void> {
         let username = this.getUsername(email);
-        let userDetails;
-        let gradeDetails;
+        let userDetails: Record<string, any>;
+        let gradeDetails: Record<string, any>;
 
         return this.getUserDetails(username).then((user) => {
+            if (user.isAdmin) {
+                window.location.href = '/admin';
+            }
+
             userDetails = user;
             return this.getGradeDetails(user.grade);
         }).then((grade) => {
             gradeDetails = grade;
-            console.log(gradeDetails);
             return this.getPreferencesDetails(userDetails.grade, username);
         }).then((preferences) => {
             this.setState({
@@ -189,39 +212,43 @@ class IndexPage extends React.Component {
         });
     }
 
-    getGradeDetails(grade) {
+    private getGradeDetails(grade: string): Promise<Record<string, any>> {
         let db = firebase.firestore();
 
         return db.collection("grades").doc(grade).get().then((snapshot) => {
-            return snapshot.data();
-        });
-    };
+            if (!snapshot.exists) {
+                throw new Error('An unexpected error occurred. Please try again later.');
+            }
 
-    getUserDetails(username) {
+            return snapshot.data() || {};
+        });
+    }
+
+    private getUserDetails(username: string): Promise<Record<string, any>> {
         let db = firebase.firestore();
 
         return db.collection("user-records").doc(username).get().then((snapshot) => {
-            if (snapshot.data() === undefined) {
-                throw new Error('You are not a current student.');
+            if (!snapshot.exists) {
+                throw new Error('Sorry, you aren\'t a current student. Please try again later.');
             }
 
-            return snapshot.data();
+            return snapshot.data() || {};
         });
-    };
+    }
 
-    getPreferencesDetails(grade, username) {
+    private getPreferencesDetails(grade: string, username: string): Promise<string[]> {
         let db = firebase.firestore();
 
         return db.collection("preferences").doc(grade).get().then((snapshot) => {
-            if (!snapshot.data()) {
+            if (!snapshot.exists) {
                 return [];
             }
 
-            return snapshot.data()[username] || [];
+            return snapshot.data()![username];
         });
-    };
+    }
 
-    getUsername(email) {
+    private getUsername(email: string): string {
         return email.substring(0, email.indexOf("@"));
     }
 }
