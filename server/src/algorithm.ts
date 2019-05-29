@@ -4,11 +4,14 @@ import * as _ from 'lodash';
 let database = databaseSource.get();
 let gradeName = process.argv[2];
 let groupAmount = parseInt(process.argv[3]);
-let runAmount =  parseInt(process.argv[4]);
+let runAmount = Math.pow(10, parseInt(process.argv[4]));
 let oneGenderGroups = process.argv[5] === 'true';
-let debugEachCompletion = process.argv[6] === '--verbose';
+let useUsernames = process.argv[6] === 'true';
+let debugEachCompletion = process.argv[7] === '--verbose';
 
 let db = database.firestore();
+
+const MOVE_ON_COUNT = 100;
 
 type Username = string
 type Group = Username[]
@@ -36,15 +39,15 @@ interface RunResult {
 }
 
 let preferencesPromise = db.collection('preferences').doc(gradeName).get().then((snapshot) => {
-    return snapshot.data();
+    return snapshot.data() || {};
 }) as Promise<Preferences>;
 
 let antiPreferencesPromise = db.collection('grades').doc(gradeName).get().then((snapshot) => {
-    return snapshot.data()!.antiPreferences;
+    return snapshot.data()!.antiPreferences || [];
 }) as Promise<string[]>;
 
 let studentNamesPromise = db.collection('grades').doc(gradeName).get().then((snapshot) => {
-    return snapshot.data()!.students;
+    return snapshot.data()!.students || {};
 }) as Promise<{ [username: string]: string }>;
 
 let usersPromise = db.collection('user-records').get().then((snapshot) => {
@@ -78,6 +81,28 @@ let groupWithNew = function copyGroupWithNewMember(group: Group, member: Usernam
     return newGroup;
 }
 
+
+/**
+ * Returns the number of users present within a single username. For example,
+ * the user "mburstein2021" would have a multiplicity of 1, since there is only
+ * one user. However, the joint-user "mburstein2021-auser2021--x2" has a
+ * multiplicity of 2. Currently, only multipliers 1 and 2 are supported.
+ *
+ * @param username The username of the user to find the multiplier for.
+ * @returns The multiplier value.
+ */
+let getMultiplier = function getMultiplierForUsername(username: Username): number {
+    if (username.endsWith("--x2")) {
+        return 2;
+    }
+
+    return 1;
+}
+
+let getAllMultiplier = function getMultiplierSumForUsernames(usernames: Username[]): number {
+    return usernames.reduce((sum, username) => sum + getMultiplier(username), 0);
+}
+
 /**
  * Checks whether a group has overflowed its maximum number of a certain gender,
  * and therefore must have a member removed.
@@ -104,24 +129,23 @@ let hasMaximum = function checkGenderHasMaximum(
     let currentAmount = 0;
 
     for (let i = 0; i < group.length; i++) {
-        currentAmount++;
+        currentAmount += getMultiplier(group[i]);
 
         if (users[group[i]].isMale === isMale) {
-            currentAmountSame++;
+            currentAmountSame += getMultiplier(group[i]);
         }
     }
 
     if (oneGender) {
-        // If it's a one-gender group, it fails if there are any non-same
-        // gendered people.
-        return currentAmount !== currentAmountSame || currentAmount > maxAmount;
+        // If it's a one-gender group, assume there is only one gender anyway
+        // so don't check the same-gender amount.
+        return currentAmount > maxAmount;
     }
 
     // Add one to the amounts, since if a new user is added it should still
     // be checked.
     return currentAmountSame > maxAmountSame || currentAmount > maxAmount;
 }
-
 
 /**
  * Returns a score representing how much a user likes a group. In other words,
@@ -138,7 +162,7 @@ let getUGScore = function getUserGroupScore(preferences: Preferences, group: Gro
     for (let i = 0; i < group.length; i++) {
         let groupMember = group[i];
         if (preferences[member].includes(groupMember)) {
-            score++;
+            score += getMultiplier(groupMember);
         }
     }
 
@@ -197,7 +221,7 @@ let getUGRanking = function findRankingOfGroupsByPreferences(preferences: Prefer
  */
 let canTryJoiningGroup = function canJoinWithoutConflict(antiPreferences: string[], group: Group, username: Username): boolean {
     for (let i = 0; i < group.length; i++) {
-        let hyphenatedCombination = [group[i], username].sort().join('-');
+        let hyphenatedCombination = [group[i], username].sort().join('__');
 
         if (antiPreferences.includes(hyphenatedCombination)) {
             return false;
@@ -222,7 +246,7 @@ let getGUScore = function getUserGroupScore(preferences: Preferences, group: Gro
     for (let i = 0; i < group.length; i++) {
         let groupMember = group[i];
         if (preferences[groupMember].includes(member)) {
-            score++;
+            score += getMultiplier(member) * getMultiplier(groupMember);
         }
     }
 
@@ -275,7 +299,7 @@ let getGroupsWithNames = function getGroupsWithFullNames(
 ): string[][] {
     return groups.map((group: Group) => {
         return group.map((username: Username) => {
-            return studentNames[username];
+            return useUsernames ? username : studentNames[username];
         });
     });
 }
@@ -501,15 +525,26 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
         let preferences = results[0];
         let users = results[1];
         let antiPreferences = results[2];
-        let totalUsersCount = Object.keys(users).length
+        let totalUsersCount = getAllMultiplier(Object.keys(users));
 
         // These maximum values are not actually the largest number of users
         // allowed per group; rather, they are the maximum amount to initially
-        // fill in when doing user rankings and placements. `unfittingUsers`
-        // is the amount of users with preferences who couldn't be fit initially
-        // and must be added later alongside users without any preferences.
-        let maxGroupSize = Math.floor(totalUsersCount / groupAmount);
-        let maxGroupGenderSize = Math.floor ((totalUsersCount / groupAmount) / 2);
+        // fill in when doing user rankings and placements. If the groups can
+        // be made evenly except for one user, e.g., "3, 4, 4, 4, 4" users per
+        // group, round up. Otherwise, round down in order to prevent
+        // overfilling, e.g., when the correct configuration is "3, 3, 4, 4, 4,"
+        // but instead the result is "2, 4, 4, 4, 4."
+        let approximatePerGroup = totalUsersCount / groupAmount
+        let unevenUsersUpCount = Math.ceil(approximatePerGroup) * groupAmount - totalUsersCount;
+        let maxGroupSize;
+
+        if (unevenUsersUpCount === 1 || unevenUsersUpCount === 0) {
+            maxGroupSize = Math.ceil(approximatePerGroup);
+        } else {
+            maxGroupSize = Math.floor(approximatePerGroup);
+        }
+
+        let maxGroupGenderSize = Math.floor((totalUsersCount / groupAmount) / 2);
 
         // For now, just focus on listed preferences, since users who filled out the ranking
         // should get priority over those who didn't
@@ -526,6 +561,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
 
         let placedUsers: Username[] = [];
         let hasUpdatedThisLoop = false;
+        let currentLoopAmounts = 0;
 
         // Loop through given users until the best matches are made.
         for (let i = 0; i < userOrder.length; i++) {
@@ -582,8 +618,15 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             // be another in this one. If there was no change, then there can't
             // be one this time either.
             if (i === userOrder.length - 1 && placedUsers.length < userOrder.length && hasUpdatedThisLoop) {
-                hasUpdatedThisLoop = false;
-                i = -1;
+                if (currentLoopAmounts > MOVE_ON_COUNT) {
+                    // If we've gotten stuck, move on. The rest of the users will
+                    // be placed in the secondary loop.
+                    console.log("Skipping after " + currentLoopAmounts + ' iterations.');
+                } else {
+                    hasUpdatedThisLoop = false;
+                    i = -1;
+                    currentLoopAmounts++;
+                }
             }
         }
 
@@ -639,7 +682,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
 
         if (debugEachCompletion) {
             /* eslint-disable-next-line no-console */
-            console.log('Iteration ' + runID + ' has been completed.');
+            console.log('Iteration ' + runID + ' has been completed out of ' + runAmount + ' with ' + currentLoopAmounts + ' extra loop' + (currentLoopAmounts === 1 ? '.' : 's.'));
         }
 
         return {
