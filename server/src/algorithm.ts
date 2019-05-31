@@ -1,17 +1,20 @@
 import * as databaseSource from './database';
 import * as _ from 'lodash';
+import * as ProgressBar from 'progress';
+
+const MOVE_ON_COUNT = 100;
+const MAX_RUN_POWER = 6.3;
+const PROGRESS_WIDTH = 40;
 
 let database = databaseSource.get();
 let gradeName = process.argv[2];
 let groupAmount = parseInt(process.argv[3]);
-let runAmount = Math.pow(10, parseInt(process.argv[4]));
+let runAmountPower = parseFloat(process.argv[4]);
+let runAmount = Math.floor(Math.pow(10, runAmountPower));
 let oneGenderGroups = process.argv[5] === 'true';
 let useUsernames = process.argv[6] === 'true';
-let debugEachCompletion = process.argv[7] === '--verbose';
 
 let db = database.firestore();
-
-const MOVE_ON_COUNT = 100;
 
 type Username = string
 type Group = Username[]
@@ -36,6 +39,11 @@ interface RunResult {
         maxGroupGenderSize: number;
         groupAmount: number;
     };
+}
+
+if (runAmountPower > MAX_RUN_POWER) {
+    console.error(runAmountPower + ' is not a vailid run power. The maximum value is ' + MAX_RUN_POWER + '.');
+    process.exit(1);
 }
 
 let preferencesPromise = db.collection('preferences').doc(gradeName).get().then((snapshot) => {
@@ -446,11 +454,11 @@ let output = function outputResults(
     for (let i = 0; i < groups.length; i++) {
         currentPlacedCount += groups[i].length;
 
-        if (groups[i].length > currentBiggestGroupSize) {
+        if (getAllMultiplier(groups[i]) > currentBiggestGroupSize) {
             currentBiggestGroupSize = groups[i].length;
         }
 
-        if (groups[i].length < currentSmallestGroupSize) {
+        if (getAllMultiplier(groups[i]) < currentSmallestGroupSize) {
             currentSmallestGroupSize = groups[i].length;
         }
     }
@@ -518,7 +526,7 @@ let output = function outputResults(
  * `preferences` is the result of `preferencesPromise`, and `users` is the result
  * of usersPromise.
  */
-let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, antiPreferencesPromise: Promise<string[]>, usersPromise: Promise<UserDetails>, runID: number): Promise<RunResult> {
+let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, antiPreferencesPromise: Promise<string[]>, usersPromise: Promise<UserDetails>, runID: number, progressBar: ProgressBar): Promise<RunResult> {
     return Promise.all([preferencesPromise, usersPromise, antiPreferencesPromise]).then((results) => {
         // `preferences` may be incomplete for users who haven't filled out the form,
         // but `users` will always be complete.
@@ -591,21 +599,26 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                 // of the same gender as the user we just added. This is potentially
                 // the same user as the new one.
                 if (hasMaximum(guRanked, user.isMale, maxGroupSize, maxGroupGenderSize, oneGenderGroups, users)) {
+                    let currentRemovedUsers = 0;
+
                     for (let k = guRanked.length - 1; k >= 0; k--) {
                         if (users[guRanked[k]].isMale === user.isMale) {
                             let removedUser = guRanked[k];
                             guRanked.splice(k, 1);
+                            currentRemovedUsers += getMultiplier(removedUser);
 
                             _.remove(placedUsers, (placedUser) => {
                                 return placedUser === removedUser
                             });
 
-                            if (username === removedUser) {
-                                continue ugRankLoop;
-                            }
+                            if (currentRemovedUsers >= getMultiplier(username)) {
+                                if (username === removedUser) {
+                                    continue ugRankLoop;
+                                }
 
-                            hasUpdatedThisLoop = true;
-                            break ugRankLoop;
+                                hasUpdatedThisLoop = true;
+                                break ugRankLoop;
+                            }
                         }
                     }
                 }
@@ -617,16 +630,10 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             // If there was a change in the last loop, it's possible there will
             // be another in this one. If there was no change, then there can't
             // be one this time either.
-            if (i === userOrder.length - 1 && placedUsers.length < userOrder.length && hasUpdatedThisLoop) {
-                if (currentLoopAmounts > MOVE_ON_COUNT) {
-                    // If we've gotten stuck, move on. The rest of the users will
-                    // be placed in the secondary loop.
-                    console.log("Skipping after " + currentLoopAmounts + ' iterations.');
-                } else {
-                    hasUpdatedThisLoop = false;
-                    i = -1;
-                    currentLoopAmounts++;
-                }
+            if (i === userOrder.length - 1 && placedUsers.length < userOrder.length && hasUpdatedThisLoop && currentLoopAmounts < MOVE_ON_COUNT) {
+                hasUpdatedThisLoop = false;
+                i = -1;
+                currentLoopAmounts++;
             }
         }
 
@@ -644,7 +651,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             // If there are ties, break them by the number of friends in the group.
             let sizeSortedGroups = _.sortBy(groups, [
                 (group) => {
-                    return group.length;
+                    return getAllMultiplier(group);
                 },
                 (group) => {
                     if (!preferences[allUsernames[i]]) {
@@ -680,10 +687,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             }
         }
 
-        if (debugEachCompletion) {
-            /* eslint-disable-next-line no-console */
-            console.log('Iteration ' + runID + ' has been completed out of ' + runAmount + ' with ' + currentLoopAmounts + ' extra loop' + (currentLoopAmounts === 1 ? '.' : 's.'));
-        }
+        progressBar.tick();
 
         return {
             groups,
@@ -707,8 +711,16 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
 let runMany = function runAlgorithmAndFindBest(runAmount: number): Promise<void> {
     let runningPromises = [];
 
+    let progressBar = new ProgressBar('Working… [:bar] :rate/s :percent :etas', {
+        complete: '=',
+        head: '>',
+        incomplete: ' ',
+        width: PROGRESS_WIDTH,
+        total: runAmount,
+    });
+
     for (let i = 0; i < runAmount; i++) {
-        runningPromises.push(run(preferencesPromise, antiPreferencesPromise, usersPromise, i));
+        runningPromises.push(run(preferencesPromise, antiPreferencesPromise, usersPromise, i, progressBar));
     }
 
     return Promise.all(runningPromises).then((results) => {
