@@ -1,18 +1,19 @@
 import * as databaseSource from './database';
 import * as _ from 'lodash';
 import * as ProgressBar from 'progress';
+import * as yargs from 'yargs';
 
 const MOVE_ON_COUNT = 100;
 const MAX_RUN_POWER = 6.3;
 const PROGRESS_WIDTH = 40;
 
 let database = databaseSource.get();
-let gradeName = process.argv[2];
-let groupSizesArgument = process.argv[3];
-let runAmountPower = parseFloat(process.argv[4]);
+let gradeName = yargs.argv.grade as string;
+let groupSizesArgument = yargs.argv.sizes as string;
+let runAmountPower = yargs.argv.power as number;
 let runAmount = Math.floor(Math.pow(10, runAmountPower));
-let oneGenderGroups = process.argv[5] === 'true';
-let useUsernames = process.argv[6] === 'true';
+let oneGenderGroups = yargs.argv.ignoreGender  === 'true';
+let useUsernames = yargs.argv.useUsernames === 'true';
 
 let db = database.firestore();
 
@@ -479,11 +480,11 @@ let output = function outputResults(
 
     /* eslint-disable no-console */
     console.log('### GROUPS: ###');
-    console.log(groupsWithNames);
+    console.log(groupsWithNames.map((group) => [group.length, group]));
     console.log('### DETAILS: ###');
     console.log(' - Group Amount');
     console.log(details.groupAmount);
-    console.log(' - Group Sizes');
+    console.log(' - Requested Group Sizes');
     console.log(details.groupSizes);
     console.log(' - User Count');
     console.log(Object.keys(users).length);
@@ -552,7 +553,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
         let userOrder = _.shuffle(usernames);
 
         // Groups start out empty.
-        let groups = [];
+        let groups: any[] = [];
 
         for (let i = 0; i < groupSizes.length; i++) {
             groups.push([]);
@@ -639,13 +640,13 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                 continue;
             }
 
-            // Sort the groups by size, so that smaller groups are tried first
-            // before larger ones get filled. This prevents the same groups.
+            // Sort the groups by the number of remaining spots, so that less-full
+            //  groups are tried first before more-full ones. This prevents the same groups.
             // from filling at the end and getting disproportionately larger.
             // If there are ties, break them by the number of friends in the group.
-            let sizeSortedGroups = _.sortBy(groups, [
-                (group) => {
-                    return getAllMultiplier(group);
+            let sizeSortedGroups = _.sortBy(_.zip(groups, groupSizes), [
+                (groupZip) => {
+                    return groupZip[0].length - (groupZip[1] as number);
                 },
                 (group) => {
                     if (!preferences[allUsernames[i]]) {
@@ -654,7 +655,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
 
                     return getUGScore(preferences, group, allUsernames[i]);
                 },
-            ]) as Group[];
+            ]).map(groupZip => groupZip[0]) as Group[];
 
             // Loop through all groups 3 times. The first time, check if they have
             // space, ignoring preference. Next, check if they have space ignoring
@@ -677,7 +678,6 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                 // less choice in the decision-making. Also, randomness makes
                 // this more "fair" as well.
                 sizeSortedGroups[j % sizeSortedGroups.length].push(allUsernames[i]);
-                console.log("Added after fact")
                 continue allUsernamesLoop;
             }
         }
