@@ -8,7 +8,7 @@ const PROGRESS_WIDTH = 40;
 
 let database = databaseSource.get();
 let gradeName = process.argv[2];
-let groupAmount = parseInt(process.argv[3]);
+let groupSizesArgument = process.argv[3];
 let runAmountPower = parseFloat(process.argv[4]);
 let runAmount = Math.floor(Math.pow(10, runAmountPower));
 let oneGenderGroups = process.argv[5] === 'true';
@@ -35,8 +35,7 @@ interface RunResult {
     preferences: Preferences;
     users: UserDetails;
     details: {
-        maxGroupSize: number;
-        maxGroupGenderSize: number;
+        groupSizes: number[];
         groupAmount: number;
     };
 }
@@ -75,6 +74,16 @@ let usersPromise = db.collection('user-records').get().then((snapshot) => {
     /* eslint-disable-next-line no-console */
     console.log(error);
 }) as Promise<UserDetails>;
+
+/**
+ * Returns an ordered array of descending group sizes.
+ *
+ * @param {string} argument The command-line argument to parse.
+ * @return {number[]} The array of group sizes.
+ */
+let getGroupSizes = function getGroupSizesForArgument(argument: string): number[] {
+    return argument.split('-').map(size => parseInt(size)).sort((a, b) => b - a);
+}
 
 /**
  * Creates a group with a new member.
@@ -472,10 +481,10 @@ let output = function outputResults(
     console.log('### GROUPS: ###');
     console.log(groupsWithNames);
     console.log('### DETAILS: ###');
-    console.log(' - Maximum Group Size');
-    console.log(details.maxGroupSize);
-    console.log(' - Group Count');
+    console.log(' - Group Amount');
     console.log(details.groupAmount);
+    console.log(' - Group Sizes');
+    console.log(details.groupSizes);
     console.log(' - User Count');
     console.log(Object.keys(users).length);
     console.log('### RESULTS: ###');
@@ -534,25 +543,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
         let users = results[1];
         let antiPreferences = results[2];
         let totalUsersCount = getAllMultiplier(Object.keys(users));
-
-        // These maximum values are not actually the largest number of users
-        // allowed per group; rather, they are the maximum amount to initially
-        // fill in when doing user rankings and placements. If the groups can
-        // be made evenly except for one user, e.g., "3, 4, 4, 4, 4" users per
-        // group, round up. Otherwise, round down in order to prevent
-        // overfilling, e.g., when the correct configuration is "3, 3, 4, 4, 4,"
-        // but instead the result is "2, 4, 4, 4, 4."
-        let approximatePerGroup = totalUsersCount / groupAmount
-        let unevenUsersUpCount = Math.ceil(approximatePerGroup) * groupAmount - totalUsersCount;
-        let maxGroupSize;
-
-        if (unevenUsersUpCount === 1 || unevenUsersUpCount === 0) {
-            maxGroupSize = Math.ceil(approximatePerGroup);
-        } else {
-            maxGroupSize = Math.floor(approximatePerGroup);
-        }
-
-        let maxGroupGenderSize = Math.floor((totalUsersCount / groupAmount) / 2);
+        let groupSizes = getGroupSizes(groupSizesArgument);
 
         // For now, just focus on listed preferences, since users who filled out the ranking
         // should get priority over those who didn't
@@ -563,7 +554,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
         // Groups start out empty.
         let groups = [];
 
-        for (let i = 0; i < groupAmount; i++) {
+        for (let i = 0; i < groupSizes.length; i++) {
             groups.push([]);
         }
 
@@ -598,7 +589,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                 // If we're at the maximum, we have to remove the least-liked user
                 // of the same gender as the user we just added. This is potentially
                 // the same user as the new one.
-                if (hasMaximum(guRanked, user.isMale, maxGroupSize, maxGroupGenderSize, oneGenderGroups, users)) {
+                if (hasMaximum(guRanked, user.isMale, groupSizes[groupID], Math.floor(groupSizes[groupID] / 2), oneGenderGroups, users)) {
                     let currentRemovedUsers = 0;
 
                     for (let k = guRanked.length - 1; k >= 0; k--) {
@@ -611,6 +602,9 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                                 return placedUser === removedUser
                             });
 
+                            // If enough users have been removed to cancel-out
+                            // the new ones, continue with the next step.
+                            // Otherwise, keep removing another user.
                             if (currentRemovedUsers >= getMultiplier(username)) {
                                 if (username === removedUser) {
                                     continue ugRankLoop;
@@ -666,14 +660,14 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             // space, ignoring preference. Next, check if they have space ignoring
             // preference and gender. Finally, check ignoring all constraints.
             for (let j = 0; j < sizeSortedGroups.length * 3; j++) {
-                let effectiveGenderSize = j < sizeSortedGroups.length ? maxGroupGenderSize : Infinity;
-                let effectiveGroupSize = j < sizeSortedGroups.length * 2 ? maxGroupSize : Infinity;
+                let effectiveGenderSize = j < sizeSortedGroups.length ? Math.floor(groupSizes[j] / 2) : Infinity;
+                let effectiveGroupSize = j < sizeSortedGroups.length * 2 ? groupSizes[j] : Infinity;
 
-                if (!canTryJoiningGroup(antiPreferences, sizeSortedGroups[j % 3], allUsernames[i])) {
+                if (!canTryJoiningGroup(antiPreferences, sizeSortedGroups[j % sizeSortedGroups.length], allUsernames[i])) {
                     continue;
                 }
 
-                if (hasMaximum(sizeSortedGroups[j % 3], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, oneGenderGroups, users)) {
+                if (hasMaximum(sizeSortedGroups[j % sizeSortedGroups.length], users[allUsernames[i]].isMale, effectiveGroupSize, effectiveGenderSize, oneGenderGroups, users)) {
                     continue;
                 }
 
@@ -682,7 +676,8 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
                 // have the lowest GU scores anyway, it makes sense that they would have
                 // less choice in the decision-making. Also, randomness makes
                 // this more "fair" as well.
-                sizeSortedGroups[j % 3].push(allUsernames[i]);
+                sizeSortedGroups[j % sizeSortedGroups.length].push(allUsernames[i]);
+                console.log("Added after fact")
                 continue allUsernamesLoop;
             }
         }
@@ -694,9 +689,8 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             preferences,
             users,
             details: {
-                maxGroupSize,
-                maxGroupGenderSize,
-                groupAmount,
+                groupSizes: groupSizes,
+                groupAmount: groupSizes.length,
             },
         };
     });
