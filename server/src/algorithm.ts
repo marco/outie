@@ -50,11 +50,15 @@ let preferencesPromise = db.collection('preferences').doc(gradeName).get().then(
     return snapshot.data() || {};
 }) as Promise<Preferences>;
 
-let antiPreferencesPromise = db.collection('grades').doc(gradeName).get().then((snapshot) => {
+let antiPreferencesPromise = db.collection('anti-preferences').doc(gradeName).get().then((snapshot) => {
     return snapshot.data()!.antiPreferences || [];
 }) as Promise<string[]>;
 
 let studentNamesPromise = db.collection('grades').doc(gradeName).get().then((snapshot) => {
+    if (useUsernames) {
+        return {};
+    }
+
     return snapshot.data()!.students || {};
 }) as Promise<{ [username: string]: string }>;
 
@@ -110,6 +114,18 @@ let groupWithNew = function copyGroupWithNewMember(group: Group, member: Usernam
  * @returns The multiplier value.
  */
 let getMultiplier = function getMultiplierForUsername(username: Username): number {
+    if (username.endsWith("--x5")) {
+        return 5;
+    }
+
+    if (username.endsWith("--x4")) {
+        return 4;
+    }
+
+    if (username.endsWith("--x3")) {
+        return 3;
+    }
+
     if (username.endsWith("--x2")) {
         return 2;
     }
@@ -207,15 +223,15 @@ let getUGRanking = function findRankingOfGroupsByPreferences(preferences: Prefer
 
     return scores.sort((a, b): number => {
         if (a.score === b.score) {
-            // If they have the same exact score, go for the one with less members.
+            // If they have the same exact score, go for the one with more members.
             // If they have the same number of members, pick randomly.
-            let lengthDifference = groups[a.groupID].length - groups[b.groupID].length;
+            let lengthDifference = groups[b.groupID].length - groups[a.groupID].length;
 
             if (lengthDifference === 0) {
                 return _.sample([-1, 1])!;
             }
 
-            return groups[a.groupID].length - groups[b.groupID].length;
+            return lengthDifference;
         }
 
         // Otherwise, bigger score wins.
@@ -239,9 +255,14 @@ let getUGRanking = function findRankingOfGroupsByPreferences(preferences: Prefer
  */
 let canTryJoiningGroup = function canJoinWithoutConflict(antiPreferences: string[], group: Group, username: Username): boolean {
     for (let i = 0; i < group.length; i++) {
-        let hyphenatedCombination = [group[i], username].sort().join('__');
+        let hyphenatedCombinationA = [group[i], username].join('__');
+        let hyphenatedCombinationB = [username, group[i]].join('__');
 
-        if (antiPreferences.includes(hyphenatedCombination)) {
+        if (antiPreferences.includes(hyphenatedCombinationA)) {
+            return false;
+        }
+
+        if (antiPreferences.includes(hyphenatedCombinationB)) {
             return false;
         }
     }
@@ -331,17 +352,23 @@ let getGroupsWithNames = function getGroupsWithFullNames(
  * @return {number} The favorability value.
  */
 let getPercentFavorability = function getPercentFavorabilityForGroup(group: Group, preferences: Preferences): number {
+    // If it's an empty group, then instead of returning NaN, treat
+    // as a "perfect" group.
+    if (group.length === 0) {
+        return 1;
+    }
+
     let currentFriendsSum = 0;
 
     for (let i = 0; i < group.length; i++) {
         for (let j = 0; j < group.length; j++) {
             if (preferences[group[i]] && preferences[group[i]].includes(group[j])) {
-                currentFriendsSum++;
+                currentFriendsSum += getMultiplier(group[i]) * getMultiplier(group[j]);
             }
         }
     }
 
-    return currentFriendsSum / (group.length * (group.length - 1));
+    return currentFriendsSum / ((getAllMultiplier(group) - 1) * (getAllMultiplier(group) - 1) * 2);
 }
 
 /**
@@ -480,14 +507,16 @@ let output = function outputResults(
 
     /* eslint-disable no-console */
     console.log('### GROUPS: ###');
-    console.log(groupsWithNames.map((group) => [group.length, group]));
+    console.log(groupsWithNames.map((group) => [getAllMultiplier(group), group]));
     console.log('### DETAILS: ###');
     console.log(' - Group Amount');
     console.log(details.groupAmount);
-    console.log(' - Requested Group Sizes');
+    console.log(' - Available Group Sizes');
     console.log(details.groupSizes);
+    console.log(' - Actual Group Sizes');
+    console.log(groups.map((group) => getAllMultiplier(group)).sort((a, b) => b - a));
     console.log(' - User Count');
-    console.log(Object.keys(users).length);
+    console.log(getAllMultiplier(Object.keys(users)));
     console.log('### RESULTS: ###');
     console.log(' - Biggest Group Size');
     console.log(currentBiggestGroupSize);
@@ -646,7 +675,7 @@ let run = function runAlgorithmOnce(preferencesPromise: Promise<Preferences>, an
             // If there are ties, break them by the number of friends in the group.
             let sizeSortedGroups = _.sortBy(_.zip(groups, groupSizes), [
                 (groupZip) => {
-                    return groupZip[0].length - (groupZip[1] as number);
+                    return getAllMultiplier(groupZip[0]) - (groupZip[1] as number);
                 },
                 (group) => {
                     if (!preferences[allUsernames[i]]) {
