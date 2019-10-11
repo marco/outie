@@ -110,26 +110,38 @@
                         </tbody>
                     </table>
                 </div>
-                <modal name="upload-students-modal" classes="" pivotY="0.3" width="100%" height="auto">
+                <modal name="upload-students-modal" classes="" pivotY="0.3" width="100%" height="auto" v-bind:clickToClose="!isProcessingUpload">
                     <div class="modal-dialog">
                         <div class="modal-content">
                             <div class="modal-header">
                                 <h5 class="modal-title">Upload a File</h5>
-                                <button class="close fas fa-times" v-on:click="stopUploadingCSV()"></button>
+                                <button v-if="!isProcessingUpload" class="close fas fa-times" v-on:click="stopUploadingCSV()"></button>
                             </div>
                             <div class="modal-body">
-                                <p>
-                                    Instead of manually entering all of the students
-                                    in a grade, you can upload an entire CSV file to be
-                                    parsed automatically. This CSV file must be in the
-                                    format "username, full name, gender".
-                                </p>
-                                <p>
-                                    To export a CSV file from Excel, please see
-                                    <a href="https://support.office.com/en-us/article/import-or-export-text-txt-or-csv-files-5250ac4c-663c-47ce-937b-339e391393ba" target="_blank">here</a>.
-                                </p>
+                                <template v-if="isProcessingUpload">
+                                    <p>Loading…</p>
+                                </template>
+                                <template v-else>
+                                    <p>
+                                        Instead of manually entering all of the students
+                                        in a grade, you can upload an entire CSV file to be
+                                        parsed automatically. This CSV file must be in the
+                                        format "username, full name, gender".
+                                    </p>
+                                    <p>
+                                        To export a CSV file from Excel, please see
+                                        <a href="https://support.office.com/en-us/article/import-or-export-text-txt-or-csv-files-5250ac4c-663c-47ce-937b-339e391393ba" target="_blank">here</a>.
+                                    </p>
+                                    <p>
+                                        Instead of making your own spreadsheet, you can also
+                                        download a template
+                                        <a href="/csv-template" target="_blank" download>here</a>.
+                                        When using the template, make sure to replace the first line with
+                                        your a student, instead of adding after the first line.
+                                    </p>
+                                </template>
                             </div>
-                            <div class="modal-footer">
+                            <div class="modal-footer" v-if="!isProcessingUpload">
                                 <label class="btn btn-primary my-0">
                                     Upload
                                     <input type="file" class="d-none" v-on:change="uploadCSVFile($event.target.files[0])">
@@ -179,6 +191,8 @@ export default {
         editingAntiPreferenceString: undefined,
         editingAntiPreferenceNewUsernameA: undefined,
         editingAntiPreferenceNewUsernameB: undefined,
+
+        isProcessingUpload: false,
     }),
     computed: {
         sortedGradeIDs: function () {
@@ -190,7 +204,8 @@ export default {
 
             for (let i = 0; i < gradeIDs.length; i++) {
                 let gradeID = gradeIDs[i];
-                let gradeName = 'Class of ' + gradeID.slice(5, 9);
+                let number = gradeID.slice(5, 9);
+                let gradeName = 'Class of ' + number + ' (Grade ' + convertYearToGrade(parseInt(number)) + ')';
 
                 if (gradeID.endsWith('f')) {
                     gradeName += ' Girls';
@@ -209,6 +224,8 @@ export default {
             if (!this.selectedGradeID) {
                 return [];
             }
+
+
 
             return Object.keys(this.grades[this.selectedGradeID].students || {}).filter((username) => username && this.userRecords[username]);
         },
@@ -308,6 +325,7 @@ export default {
         },
         uploadCSVFile: function (file) {
             let reader = new FileReader();
+            this.isProcessingUpload = true;
 
             reader.addEventListener('loadend', () => {
                 let records = csvParse(reader.result);
@@ -325,8 +343,10 @@ export default {
                 }
 
                 Promise.all(promises).then(() => {
-                    this.stopUploadingCSV();
                     return this.fetchData();
+                }).then(() => {
+                    this.stopUploadingCSV();
+                    this.isProcessingUpload = false;
                 });
             })
 
@@ -367,6 +387,18 @@ export default {
         'editing-anti-preference-row': EditingAntiPreferenceRow,
     },
 };
+
+function convertYearToGrade(year) {
+    if (!year || isNaN(year)) {
+        return 'Unknown';
+    }
+
+    if (new Date().getMonth() < 8) {
+        return 12 - (year - new Date().getFullYear() - 1);
+    } else {
+        return 12 - (year - new Date().getFullYear());
+    }
+}
 
 function fetchGrades() {
     let db = firebase.firestore();

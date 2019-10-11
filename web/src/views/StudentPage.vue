@@ -19,7 +19,7 @@
                 </p>
 
                 <p>
-                    However, the most import thing to know is that you <em>will not</em>
+                    The most import thing to know is that you <em>will not</em>
                     be placed with your friends if you don't fill out the preferences
                     survey! So make sure that you choose your friends before the deadline.
                 </p>
