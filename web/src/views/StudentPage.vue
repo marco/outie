@@ -147,7 +147,10 @@ export default {
     },
     methods: {
         onClickSignIn: function () {
-            return auth.tryLongAuth().then(this.handleAuthStatus);
+            return auth.tryLongAuth().then(this.handleAuthStatus).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
+            });
         },
         handleAuthStatus: function (status) {
             if (!status || status.status === 0) {
@@ -170,7 +173,7 @@ export default {
                 delete students[this.username];
                 this.otherStudents = students;
                 this.hasLoaded = true;
-            }).catch(function(error) {
+            }).catch((error) => {
                 console.log(error)
                 // TODO: Handle it.
             });
@@ -183,6 +186,9 @@ export default {
                 preferences: this.currentChosenPreferences.filter((preference) => preference),
             }, { merge: true }).then(() => {
                 this.hasSavedPreferences = true;
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
             });
         },
 
@@ -195,7 +201,10 @@ export default {
         }
     },
     mounted: function () {
-        auth.tryQuickAuth().then(this.handleAuthStatus);
+        auth.tryQuickAuth().then(this.handleAuthStatus).catch((error) => {
+            console.log(error)
+            // TODO: Handle it.
+        });
     },
 }
 

@@ -259,6 +259,9 @@ export default {
                 return this.fetchData();
             }).then(() => {
                 this.resetEditingUser();
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
             });
         },
         saveEditedStudent: function () {
@@ -272,12 +275,18 @@ export default {
                 return this.fetchData();
             }).then(() => {
                 this.resetEditingUser();
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
             });
         },
         deleteStudent: function (username) {
             users.deleteUser(this.selectedGradeID, username).then(() => {
                 return this.fetchData();
-            })
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
+            });
         },
         startAddingAntiPreference: function () {
             this.resetEditingAntiPreference();
@@ -298,7 +307,10 @@ export default {
                 return this.fetchData();
             }).then(() => {
                 this.resetEditingAntiPreference();
-            })
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
+            });
         },
         saveEditedAntiPreference: function () {
             antiPreferences.updateAntiPreference(
@@ -310,11 +322,17 @@ export default {
                 return this.fetchData();
             }).then(() => {
                 this.resetEditingAntiPreference();
-            })
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
+            });
         },
         deleteAntiPreference: function (antiPreferenceString) {
             antiPreferences.deleteAntiPreferenceString(this.selectedGradeID, antiPreferenceString).then(() => {
                 return this.fetchData();
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
             });
         },
         startUploadingCSV: function () {
@@ -347,6 +365,9 @@ export default {
                 }).then(() => {
                     this.stopUploadingCSV();
                     this.isProcessingUpload = false;
+                }).catch((error) => {
+                    console.log(error)
+                    // TODO: Handle it.
                 });
             })
 
@@ -357,6 +378,9 @@ export default {
                 this.grades = results[0];
                 this.userRecords = results[1];
                 this.hasLoaded = true;
+            }).catch((error) => {
+                console.log(error)
+                // TODO: Handle it.
             });
         },
         resetEditingUser: function () {
@@ -380,6 +404,9 @@ export default {
             }
 
             return this.fetchData();
+        }).catch((error) => {
+            console.log(error)
+            // TODO: Handle it.
         });
     },
     components: {
@@ -415,6 +442,9 @@ function fetchGrades() {
         });
 
         return grades;
+    }).catch((error) => {
+        console.log(error)
+        // TODO: Handle it.
     });
 }
 
@@ -433,6 +463,9 @@ function fetchUsers() {
         });
 
         return users;
+    }).catch((error) => {
+        console.log(error)
+        // TODO: Handle it.
     });
 }
 </script>
